@@ -68,6 +68,7 @@ func (mm *MetricsManager) Load() {
 func (mm *MetricsManager) UpdateRegistry() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
+	// clean old metrics (if they are deleted) | update existing
 	for metricName, metric := range mm.registeredMetrics {
 		if idx := slices.IndexFunc(mm.MetricsConfig.Metrics, func(metric Metric) bool {
 			return metricName == metric.Name
@@ -75,18 +76,20 @@ func (mm *MetricsManager) UpdateRegistry() {
 			mm.registeredMetrics[metricName] = buildMetric(&mm.MetricsConfig.Metrics[idx])
 			log.Printf("metric:%v found in the new config, updated", metricName)
 		} else {
-			log.Printf("metric:%v not found in the new config, unregistered", metricName)
+			log.Printf("metric:%v not found in the new config, purged", metricName)
 			mm.Registry.Unregister(metric)
 			delete(mm.registeredMetrics, metricName)
 		}
 	}
 	for _, newMetric := range mm.MetricsConfig.Metrics {
-		md := buildMetric(&newMetric)
-		registerErr := mm.Registry.Register(md)
-		if registerErr != nil {
-			log.Printf("fail to register metric:%v | discarded", registerErr)
-		} else {
-			mm.registeredMetrics[newMetric.Name] = md
+		if _, ok := mm.registeredMetrics[newMetric.Name]; !ok {
+			md := buildMetric(&newMetric)
+			registerErr := mm.Registry.Register(md)
+			if registerErr != nil {
+				log.Printf("fail to register metric:%v | discarded", registerErr)
+			} else {
+				mm.registeredMetrics[newMetric.Name] = md
+			}
 		}
 	}
 	log.Println("metrics updated")
