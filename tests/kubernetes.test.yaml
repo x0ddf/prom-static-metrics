@@ -1,0 +1,42 @@
+apiVersion: v1
+data:
+  config.yaml: |+
+    metrics:
+      - name: release_version
+        value: 2025.10.192
+        description: prints release information
+      - name: is_some_feature_flag_enabled
+        value: true
+        description: Prints state of the feature flag
+kind: ConfigMap
+metadata:
+  name: metrics-test-config
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: prom-static-metrics
+  name: prom-static-metrics
+spec:
+  volumes:
+    - name: config
+      configMap:
+        name: metrics-test-config
+  containers:
+  - env:
+    - name: PORT
+      value: "8080"
+    - name: CONFIG_FILE
+      value: /var/lib/prom-static-metrics/config/config.yaml
+    image: ghcr.io/x0ddf/prom-static-metrics:latest
+    name: prom-static-metrics
+    volumeMounts:
+      - mountPath: /var/lib/prom-static-metrics/config
+        name: config
+    ports:
+    - containerPort: 8080
+    resources: {}
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+---
