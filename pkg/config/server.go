@@ -14,15 +14,18 @@ type MetricsManager struct {
 	MetricsConfig     MetricsConfig
 	configPath        string
 	Registry          *prometheus.Registry
-	registeredMetrics map[string]prometheus.Gauge
+	registeredMetrics map[string]*prometheus.GaugeVec
+	mmVals            map[string]string
 	mu                sync.Mutex
 }
 
 func NewMetricsManager(configPath string) *MetricsManager {
+	//gaugeVec * prometheus.GaugeVec
 	manager := &MetricsManager{
 		configPath:        configPath,
 		Registry:          prometheus.NewRegistry(),
-		registeredMetrics: make(map[string]prometheus.Gauge),
+		registeredMetrics: make(map[string]*prometheus.GaugeVec),
+		mmVals:            make(map[string]string),
 	}
 	manager.Load()
 	manager.UpdateRegistry()
@@ -69,39 +72,43 @@ func (mm *MetricsManager) UpdateRegistry() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	// clean old metrics (if they are deleted) | update existing
-	for metricName, metric := range mm.registeredMetrics {
+	for metricName, gaugeVec := range mm.registeredMetrics {
 		if idx := slices.IndexFunc(mm.MetricsConfig.Metrics, func(metric Metric) bool {
 			return metricName == metric.Name
 		}); idx >= 0 {
-			mm.registeredMetrics[metricName] = buildMetric(&mm.MetricsConfig.Metrics[idx])
 			log.Printf("metric:%v found in the new config, updated", metricName)
+			newSpec := mm.MetricsConfig.Metrics[idx]
+			newMetricStringValue := fmt.Sprintf("%v", newSpec.Value)
+			if newMetricStringValue != mm.mmVals[metricName] {
+				newGauge := gaugeVec.With(prometheus.Labels{metricName: newMetricStringValue})
+				newGauge.Set(1)
+				gaugeVec.Delete(prometheus.Labels{metricName: mm.mmVals[metricName]})
+				mm.mmVals[metricName] = newMetricStringValue
+			}
 		} else {
 			log.Printf("metric:%v not found in the new config, purged", metricName)
-			mm.Registry.Unregister(metric)
+			mm.Registry.Unregister(*gaugeVec)
 			delete(mm.registeredMetrics, metricName)
+			delete(mm.mmVals, metricName)
 		}
 	}
 	for _, newMetric := range mm.MetricsConfig.Metrics {
 		if _, ok := mm.registeredMetrics[newMetric.Name]; !ok {
-			md := buildMetric(&newMetric)
-			registerErr := mm.Registry.Register(md)
+			vec := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Name: newMetric.Name,
+				Help: newMetric.Description,
+			}, []string{newMetric.Name})
+			metricStringValue := fmt.Sprintf("%v", newMetric.Value)
+			vec.With(prometheus.Labels{newMetric.Name: metricStringValue}).Set(1)
+			registerErr := mm.Registry.Register(vec)
 			if registerErr != nil {
 				log.Printf("fail to register metric:%v | discarded", registerErr)
 			} else {
-				mm.registeredMetrics[newMetric.Name] = md
+				mm.registeredMetrics[newMetric.Name] = vec
+				mm.mmVals[newMetric.Name] = metricStringValue
 			}
 		}
 	}
 	log.Println("metrics updated")
 
-}
-
-func buildMetric(m *Metric) prometheus.Gauge {
-	built := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        m.Name,
-		Help:        m.Description,
-		ConstLabels: map[string]string{m.Name: fmt.Sprintf("%v", m.Value)},
-	})
-	built.Set(1)
-	return built
 }

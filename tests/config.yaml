@@ -1,8 +1,8 @@
 metrics:
   - name: release_version
-    value: 2025.10.192
+    value: 2025.10.196
     description: prints release information
   - name: is_some_feature_flag_enabled
-    value: true
+    value: false
     description: Prints state of the feature flag
 
